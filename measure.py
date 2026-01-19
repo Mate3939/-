@@ -11,9 +11,9 @@ import os
 
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 
-LEFT_CAM = 0
-RIGHT_CAM = 2
-CALIB_FILE = r"C:\Users\mts20\OneDrive\바탕 화면\스테레오 카메라\calib_data.npz"
+LEFT_CAM = 2
+RIGHT_CAM = 1
+CALIB_FILE = r"C:\Users\mts20\Desktop\자율주행\calibration_data.npz"
 
 # 캘리브레이션 데이터 로드
 if not os.path.exists(CALIB_FILE):
@@ -39,8 +39,12 @@ cap_right.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
 cap_right.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
 print("="*60)
-print("거리 측정 v2 - 흑백 명암비")
+print("거리 측정 v2 - 흑백 명암비 (왼쪽 카메라 기준)")
 print("="*60)
+print("[ 카메라 설정 ]")
+print("  왼쪽 카메라 (카메라 2) = 레퍼런스 (OpenCV 표준)")
+print("  오른쪽 카메라 (카메라 1) = 보조 (거리 계산용)")
+print()
 print("[ 흑백 명암 ]")
 print("  밝은 부분 (흰색) = 가까운 거리")
 print("  어두운 부분 (검정) = 먼 거리")
@@ -128,7 +132,7 @@ while True:
         mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY
     )
 
-    # 디스패리티 계산
+    # 디스패리티 계산 (왼쪽 카메라 기준 - OpenCV 표준)
     disparity = stereo.compute(gray_left, gray_right).astype(np.float32) / 16.0
 
     # 흑백 명암비로 시각화 (가까움=밝게)
@@ -183,10 +187,8 @@ while True:
 
     cv2.imshow("Depth Map", disp_display)
 
-    # 원본 화면도 작게 표시
-    combined_orig = np.hstack([rect_left, rect_right])
-    combined_orig = cv2.resize(combined_orig, (1280, 360))
-    cv2.imshow("Original (Left + Right)", combined_orig)
+    # 왼쪽 카메라 원본 (레퍼런스) - 별도 창
+    cv2.imshow("Original (Left Camera - Reference)", rect_left)
 
     key = cv2.waitKey(30) & 0xFF
 

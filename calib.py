@@ -11,13 +11,13 @@ import os
 
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 
-LEFT_CAM = 0
-RIGHT_CAM = 2
+LEFT_CAM = 2
+RIGHT_CAM = 1  # USB 허브 사용, 좌우 확인됨
 CHESSBOARD_SIZE = (7, 5)  # 내부 코너 개수 (가로, 세로)
 SQUARE_SIZE = 23.5  # 실제 사각형 크기 (mm) - 측정 확인됨
 
 # 캘리브레이션 데이터 저장 경로
-CALIB_FILE = r"C:\Users\mts20\OneDrive\바탕 화면\스테레오 카메라\calib_data.npz"
+CALIB_FILE = r"C:\Users\mts20\Desktop\자율주행\calibration_data.npz"
 
 print("="*60)
 print("스테레오 카메라 캘리브레이션 v2")

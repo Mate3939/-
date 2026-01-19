@@ -261,3 +261,186 @@ arduino.write(f"STEER:{steer_angle}\n")
 - SGBM 파라미터: NumDisp, BlockSize 조정
 - 히스토그램 균등화로 조명 보정
 - WLS 필터 (향후 고려)
+
+---
+
+## 2026-01-20: 데스크톱 환경 이전 및 캘리브레이션 검증
+
+### 환경 이전
+- 랩탑(RTX 4050) → 데스크톱(RTX 4070Ti Super) 환경 전환
+- Git으로 코드 동기화 완료
+- 캘리브레이션 파일 경로 변경: `C:\Users\mts20\Desktop\자율주행\calibration_data.npz`
+
+### 카메라 인덱스 재설정
+
+#### 문제
+- 기존: LEFT_CAM=0, RIGHT_CAM=2
+- 데스크톱에서 카메라 0이 폰 카메라(Windows Phone Link)로 인식됨
+- HD Pro Webcam C920 중 하나가 "Unknown" 상태
+
+#### 해결
+- **USB 허브 사용**으로 해결
+- 최종 설정: **LEFT_CAM=2, RIGHT_CAM=1**
+- 카메라 물리적 위치: 왼쪽=카메라2, 오른쪽=카메라1
+
+### 캘리브레이션 검증 ✅
+
+#### 테스트 환경
+- 빈 방에서 거리 측정
+- 자로 실측값 확인
+
+#### 결과
+- **1~3m 거리: ±2cm 오차** ✅
+  - 자율주행 대회에 충분한 정확도
+  - 실측값과 거의 일치
+- **근거리 (50cm 이하): 측정 부정확** ⚠️
+  - Baseline(167mm) 대비 너무 가까움
+  - FOV 겹침 부족
+  - 초음파/적외선 센서 병행 권장
+
+#### 의의
+- **스테레오 카메라 시스템 검증 완료**
+- 대회 목표 거리(1~3m)에서 신뢰할 수 있는 정확도 확보
+
+### YOLO 통합 시도 및 롤백
+
+#### 시도 내용
+1. `measure_hand.py` 생성
+   - YOLOv8 객체 감지
+   - MediaPipe 손 인식 시도
+2. MediaPipe API 호환성 문제 (`'solutions'` attribute 없음)
+3. YOLO 단독 실행으로 변경
+
+#### 문제
+- **YOLO가 객체 인식 자체를 못함**
+- 바운딩 박스가 전혀 표시되지 않음
+- 카메라 로드 문제도 발생
+
+#### 조치
+- **Git 롤백** (`measure.py` 복원)
+- 기본 거리 측정 기능으로 복귀
+- YOLO 통합은 추후 재시도
+
+### 스테레오 비전 레퍼런스 카메라 문제
+
+#### 초기 혼란
+- 사용자 요구: "오른쪽 카메라를 주 시야로"
+- "교점이 되는 지점은 오른쪽으로 해서 만들고 겹쳐지게 만들어야 한다"
+- 왼쪽/오른쪽 카메라가 depth 카메라에 겹쳐져 보이는 문제
+
+#### 조사 결과 (웹 검색)
+**OpenCV 표준 규칙**:
+- `stereo.compute(left, right)` 순서 고정
+- **왼쪽 카메라가 항상 레퍼런스**
+- 3D 좌표는 왼쪽 카메라 위치 기준
+- Q matrix도 왼쪽 기준으로 생성됨
+
+**참고 자료**:
+- LearnOpenCV: Making a Low-Cost Stereo Camera
+- OpenCV 공식 문서: Depth Map from Stereo Images
+- ROS/OpenCV 스테레오 비전 표준
+
+#### 해결책
+- **왼쪽 카메라를 레퍼런스로 확정**
+- 사용자 동의: "주 시야는 내가 정한거라 상관 없음. 왼쪽이 레퍼런스 자료면 왼쪽으로 가자"
+- 표준 방식 준수로 안정성 확보
+
+### measure.py 최종 수정
+
+#### 변경 사항
+```python
+# 카메라 설정
+LEFT_CAM = 2  # 레퍼런스 (OpenCV 표준)
+RIGHT_CAM = 1  # 보조 (거리 계산용)
+
+# Disparity 계산 (왼쪽 카메라 기준)
+disparity = stereo.compute(gray_left, gray_right)
+
+# Q matrix 원본 사용 (왼쪽 기준 캘리브레이션)
+points_3d = cv2.reprojectImageTo3D(disparity, Q)
+
+# Display
+cv2.imshow("Depth Map", disp_display)
+cv2.imshow("Original (Left Camera - Reference)", rect_left)
+```
+
+#### 화면 구성
+1. **Depth Map**: 흑백 명암비 (밝음=가까움, 어두움=멀리)
+   - 왼쪽 카메라 관점의 깊이 정보
+   - 마우스 클릭으로 거리 측정
+2. **Original (Left Camera - Reference)**: 왼쪽 카메라 원본 컬러 영상
+   - 레퍼런스 카메라 시야
+
+### 기술적 발견
+
+#### OpenCV 스테레오 비전 표준
+1. **왼쪽 카메라 = 레퍼런스**
+   - 모든 3D 좌표는 왼쪽 카메라 기준
+   - `stereoCalibrate()`도 왼쪽 기준 Q matrix 생성
+2. **오른쪽 카메라를 레퍼런스로 쓰려면**:
+   - Q matrix 재계산 필요 (`Q[3,2] *= -1`)
+   - Disparity 계산 순서 변경 (`compute(right, left)`)
+   - 복잡하고 비표준적
+3. **권장**: 표준 방식(왼쪽 레퍼런스) 유지
+
+#### Baseline 위치 확인
+- 현재 설정: 왼쪽(카메라2) - 오른쪽(카메라1)
+- Baseline: ~167mm
+- OpenCV 표준과 일치하는 배치
+
+### 근거리 오차 대응 결정
+
+#### 문제
+- 50cm 이하 거리에서 측정 오차가 큼
+- Baseline(167mm) 한계
+
+#### 해결 방안 검토
+1. NumDisparities 증가 (256)
+2. MinDisparity 음수 설정
+3. WLS Filter 추가
+4. Baseline 물리적으로 줄이기 (50~100mm)
+5. 초음파 센서 병행
+6. Wide Angle 렌즈 교체
+
+#### 최종 결정 ✅
+**근거리(<50cm) 측정은 불필요**
+- 이유: 차량 길이 고려 시 50cm는 충돌 직전 거리
+- 자율주행에서 중요한 거리: **1~3m**
+- 현재 시스템 정확도(±2cm)로 충분
+- **추가 수정 없이 진행**
+
+### 다음 단계
+
+1. **measure_hand.py, measure_yolo.py 수정**
+   - 왼쪽 카메라 레퍼런스로 통일
+   - 카메라 인덱스 업데이트 (2, 1)
+
+2. **YOLO 통합 재시도**
+   - 객체 인식 안되는 문제 디버깅
+   - 모델 로드 확인
+   - Confidence threshold 조정
+
+3. **차선 인식**
+   - 주최측 데이터셋 전처리
+   - YOLOv8 Fine-tuning
+
+4. **아두이노 연동**
+   - pyserial 통신 구현
+   - 거리 → 조향각 변환 로직
+
+### 교훈
+
+#### 표준 준수의 중요성
+- OpenCV는 왼쪽 카메라 레퍼런스가 표준
+- 표준을 따르면 안정적이고 예측 가능
+- 비표준 방식은 복잡도만 증가
+
+#### 웹 검색 활용
+- 로지텍 C920 스테레오 비전 레퍼런스 많음
+- OpenCV 공식 문서 + 커뮤니티 자료 조합
+- 표준 규칙 확인 필수
+
+#### 롤백의 중요성
+- YOLO 통합 실패 시 즉시 롤백
+- Git 버전 관리로 안전하게 복원
+- 기본 기능 먼저 안정화, 기능 추가는 나중에

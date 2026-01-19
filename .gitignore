@@ -23,3 +23,5 @@ Thumbs.db
 # 임시 파일
 *.tmp
 *.log
+*.pt
+yolov8*.pt
